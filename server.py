@@ -4,7 +4,6 @@ from typing import Any
 
 import pytz
 import requests
-import re
 from mcp.server.fastmcp import FastMCP
 
 # Create an MCP server
@@ -283,6 +282,7 @@ def plan_journey(
         return _simplify_journey_response(data)
     except Exception as e:
         return {"error": str(e)}
+
 
 @mcp.tool()
 def get_site_departures(
