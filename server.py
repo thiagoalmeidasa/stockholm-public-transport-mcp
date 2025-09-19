@@ -4,6 +4,7 @@ from typing import Any
 
 import pytz
 import requests
+import re
 from mcp.server.fastmcp import FastMCP
 
 # Create an MCP server
@@ -40,7 +41,10 @@ def _get_best_time(leg_data: dict[str, Any], time_type: str) -> str:
     planned_time = leg_data.get(planned_key)
 
     # Prefer real-time (estimated) over planned time
-    return _convert_utc_to_stockholm(estimated_time or planned_time)
+    best_time = estimated_time or planned_time
+    if best_time and isinstance(best_time, str):
+        return _convert_utc_to_stockholm(best_time)
+    return ""
 
 
 def _simplify_journey_response(data: dict[str, Any]) -> dict[str, Any]:
@@ -131,14 +135,86 @@ def stop_lookup(name: str) -> list[dict[str, Any]]:
         return [{"error": str(e)}]
 
 
+def _convert_site_id(site_id: str) -> int | None:
+    """Convert SL Stop Lookup API site ID to Departure API site ID format.
+
+    Takes the last 4 digits of the full stop ID.
+    For example: '300109001' becomes 9001, '300102131' becomes 2131.
+
+    Args:
+        site_id: Site ID from SL Stop Lookup API
+
+    Returns:
+        Converted site ID as integer (last 4 digits), or None if conversion fails
+    """
+    try:
+        # Ensure input is string and has at least 4 digits
+        if not isinstance(site_id, str) or len(site_id) < 4:
+            return None
+
+        # Take the last 4 digits
+        last_four_digits = site_id[-4:]
+        # Convert to integer
+        converted = int(last_four_digits)
+        return converted
+    except (ValueError, TypeError):
+        return None
+
+
+@mcp.tool()
+def site_lookup(name: str) -> list[dict[str, Any]]:
+    """Look up site IDs by name in Stockholm public transport system.
+
+    This function uses stop_lookup() internally and converts the IDs to be
+    compatible with the Departure API format.
+
+    SiteId conversion:
+    The SL Stop Lookup API returns IDs in format '3ABCDEFGH' which need to be
+    converted to 'BCDEFGH' format for the Departure API. For example:
+    '300109001' becomes 9001.
+
+    Args:
+        name: Name of the stop/station to search for
+
+    Returns:
+        List of matching sites with their IDs, names, and other metadata
+    """
+    # Get locations from stop_lookup
+    locations = stop_lookup(name)
+
+    # Check for error in stop_lookup response
+    if len(locations) == 1 and "error" in locations[0]:
+        return locations
+
+    # Convert and filter locations with valid site IDs
+    simplified_locations = []
+    for location in locations:
+        site_id = str(location.get("id"))
+        converted_id = _convert_site_id(site_id)
+
+        if converted_id is not None:
+            simplified_locations.append(
+                {
+                    "id": converted_id,
+                    "original_id": site_id,  # Keep original ID for reference
+                    "name": location.get("name", ""),
+                    "coordinates": location.get("coordinates", []),
+                    "match_quality": location.get("match_quality", 0),
+                    "is_best_match": location.get("is_best_match", False),
+                }
+            )
+
+    return simplified_locations
+
+
 @mcp.tool()
 def plan_journey(
     origin_id: str,
     destination_id: str,
     trips: int = 3,
     exclude_walking: bool = True,
-    exclude_transport_types: list[str] = None,
-    departure_time: str = None,
+    exclude_transport_types: list[str] | None = None,
+    departure_time: str | None = None,
     max_walking_distance: int = 500,
 ) -> dict[str, Any]:
     """Plan a journey between two stops in Stockholm public transport system.
@@ -177,7 +253,7 @@ def plan_journey(
         if exclude_walking:
             excluded_means |= 32  # Walking bit
 
-        if exclude_transport_types:
+        if exclude_transport_types is not None:
             transport_map = {"bus": 1, "metro": 2, "train": 4, "tram": 8, "ship": 16}
             for transport in exclude_transport_types:
                 if transport.lower() in transport_map:
@@ -205,5 +281,58 @@ def plan_journey(
 
         # Return simplified response
         return _simplify_journey_response(data)
+    except Exception as e:
+        return {"error": str(e)}
+
+@mcp.tool()
+def get_site_departures(
+    site_id: int,
+    transport: str | None = None,
+    direction: int | None = None,
+    line: int | None = None,
+    forecast: int | None = None,
+) -> dict[str, Any]:
+    """Get upcoming departures and deviations for a site.
+
+    WORKFLOW:
+    1. First use site_lookup() to find the site ID for your stop, do not use stop_lookup() since it's not compatible.
+    2. Then use this tool with the site ID and optional filters
+    3. Always make clear which kind of transport is being showed
+
+    Args:
+        site_id: Site ID (get from site_lookup tool, it returns converted IDs ready to use)
+        transport: Optional filter by transport mode: 'BUS', 'METRO', 'TRAIN', 'TRAM', 'SHIP'
+        direction: Optional filter by line direction code (integer)
+        line: Optional filter by specific line number (integer)
+        forecast: Window of time in minutes to fetch departures for (e.g. 30 for next 30 minutes)
+
+    Returns:
+        Dictionary containing:
+        - statusCode: Response status
+        - message: Status message
+        - departures: List of upcoming departures with:
+            - transport: Transport mode
+            - line: Line number
+            - destination: Final destination
+            - timeTabledDateTime: Scheduled departure time
+            - expectedDateTime: Real-time expected departure time (if available)
+            - displayTime: Human readable time (e.g. "Now", "2 min", "14:37")
+        - deviations: Any service disruptions or changes affecting the stop
+    """
+    try:
+        url = f"https://transport.integration.sl.se/v1/sites/{site_id}/departures"
+        params = {
+            "transport": transport,
+            "direction": direction,
+            "line": line,
+            "forecast": forecast,
+        }
+        # Remove None values from params
+        params = {k: v for k, v in params.items() if v is not None}
+
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
+        return data
     except Exception as e:
         return {"error": str(e)}
