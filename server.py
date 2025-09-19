@@ -134,30 +134,30 @@ def stop_lookup(name: str) -> list[dict[str, Any]]:
         return [{"error": str(e)}]
 
 
-def _convert_site_id(site_id: str) -> int | None:
+def _convert_site_id(site_id: str) -> str | None:
     """Convert SL Stop Lookup API site ID to Departure API site ID format.
-
-    Takes the last 4 digits of the full stop ID.
-    For example: '300109001' becomes 9001, '300102131' becomes 2131.
-
+    Takes the last 4 digits of the full stop ID as an integer and returns it as a string.
+    For example: '300109001' becomes '9001', '300102131' becomes '2131'.
     Args:
         site_id: Site ID from SL Stop Lookup API
-
     Returns:
-        Converted site ID as integer (last 4 digits), or None if conversion fails
+        Converted site ID (last 4 digits as a string), or None if conversion fails
     """
-    try:
-        # Ensure input is string and has at least 4 digits
-        if not isinstance(site_id, str) or len(site_id) < 4:
-            return None
-
-        # Take the last 4 digits
-        last_four_digits = site_id[-4:]
-        # Convert to integer
-        converted = int(last_four_digits)
-        return converted
-    except (ValueError, TypeError):
+    # Ensure input is a string and has at least 4 characters
+    if not isinstance(site_id, str) or len(site_id) < 4:
         return None
+
+    try:
+        # Extract the last four digits as a substring
+        last_four_digits_str = site_id[-4:]
+        # Convert to integer and ensure it's within the valid range
+        last_four_digits_int = int(last_four_digits_str)
+        if 1000 <= last_four_digits_int < 10000:
+            return str(last_four_digits_int)
+    except (ValueError, TypeError):
+        pass
+
+    return None
 
 
 @mcp.tool()
@@ -188,14 +188,14 @@ def site_lookup(name: str) -> list[dict[str, Any]]:
     # Convert and filter locations with valid site IDs
     simplified_locations = []
     for location in locations:
-        site_id = str(location.get("id"))
+        site_id = location.get("id")
         converted_id = _convert_site_id(site_id)
 
         if converted_id is not None:
             simplified_locations.append(
                 {
-                    "id": converted_id,
-                    "original_id": site_id,  # Keep original ID for reference
+                    "site_id": converted_id,
+                    "_original_id": site_id,  # Keep original ID for reference
                     "name": location.get("name", ""),
                     "coordinates": location.get("coordinates", []),
                     "match_quality": location.get("match_quality", 0),
@@ -295,7 +295,7 @@ def get_site_departures(
     """Get upcoming departures and deviations for a site.
 
     WORKFLOW:
-    1. First use site_lookup() to find the site ID for your stop, do not use stop_lookup() since it's not compatible.
+    1. Always use site_lookup() to find the site ID for your stop, do not use stop_lookup() since it's not compatible.
     2. Then use this tool with the site ID and optional filters
     3. Always make clear which kind of transport is being showed
 

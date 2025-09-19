@@ -353,7 +353,7 @@ class TestSiteLookup:
         result = site_lookup("T-Centralen")
 
         assert len(result) == 1
-        assert result[0]["id"] == 9001
+        assert result[0]["id"] == '9001'
         assert result[0]["original_id"] == "300109001"
         assert result[0]["name"] == "T-Centralen"
 
@@ -381,7 +381,7 @@ class TestSiteLookup:
     def test_site_id_conversion(self):
         """Test site ID conversion logic."""
         # Test valid case
-        assert _convert_site_id("300109001") == 9001
+        assert _convert_site_id("300109001") == '9001'
 
         # Test invalid cases
         assert _convert_site_id("invalid") is None
