@@ -323,6 +323,7 @@ def test_timezone_conversion_parametrized(time_str, expected):
     result = _convert_utc_to_stockholm(time_str)
     assert result == expected
 
+
 class TestSiteLookup:
     """Test site lookup functionality."""
 
@@ -343,7 +344,10 @@ class TestSiteLookup:
         }
 
         responses.add(
-            responses.GET, f"{BASE_URL}/stop-finder", json=mock_stop_response, status=200
+            responses.GET,
+            f"{BASE_URL}/stop-finder",
+            json=mock_stop_response,
+            status=200,
         )
 
         result = site_lookup("T-Centralen")
@@ -384,6 +388,7 @@ class TestSiteLookup:
         assert _convert_site_id("123") is None
         assert _convert_site_id(12345) is None
 
+
 class TestGetSiteDepartures:
     """Test get site departures functionality."""
 
@@ -400,17 +405,17 @@ class TestGetSiteDepartures:
                     "direction": "Handen",
                     "timeTabledDateTime": "2025-07-05T13:18:00Z",
                     "expectedDateTime": "2025-07-05T13:18:00Z",
-                    "displayTime": "13:18"
+                    "displayTime": "13:18",
                 }
             ],
-            "deviations": []
+            "deviations": [],
         }
 
         responses.add(
             responses.GET,
             f"https://transport.integration.sl.se/v1/sites/9001/departures",
             json=mock_response,
-            status=200
+            status=200,
         )
 
         result = get_site_departures(9001)
@@ -426,7 +431,7 @@ class TestGetSiteDepartures:
         responses.add(
             responses.GET,
             f"https://transport.integration.sl.se/v1/sites/9001/departures",
-            status=500
+            status=500,
         )
 
         result = get_site_departures(9001)
@@ -440,14 +445,14 @@ class TestGetSiteDepartures:
             "statusCode": 200,
             "message": "OK",
             "departures": [],
-            "deviations": []
+            "deviations": [],
         }
 
         responses.add(
             responses.GET,
             f"https://transport.integration.sl.se/v1/sites/9001/departures",
             json=mock_response,
-            status=200
+            status=200,
         )
 
         result = get_site_departures(9001)
@@ -468,20 +473,22 @@ class TestGetSiteDepartures:
                     "direction": "Handen",
                     "timeTabledDateTime": "2025-07-05T13:18:00Z",
                     "expectedDateTime": "2025-07-05T13:18:00Z",
-                    "displayTime": "13:18"
+                    "displayTime": "13:18",
                 }
             ],
-            "deviations": []
+            "deviations": [],
         }
 
         responses.add(
             responses.GET,
             f"https://transport.integration.sl.se/v1/sites/9001/departures?transport=METRO&direction=1&line=19&forecast=30",
             json=mock_response,
-            status=200
+            status=200,
         )
 
-        result = get_site_departures(9001, transport="METRO", direction=1, line=19, forecast=30)
+        result = get_site_departures(
+            9001, transport="METRO", direction=1, line=19, forecast=30
+        )
 
         assert "departures" in result
         assert len(result["departures"]) == 1
