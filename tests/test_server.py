@@ -2,13 +2,13 @@
 
 import pytest
 import responses
-from datetime import datetime
-import pytz
-from unittest.mock import patch
 
 from server import (
     stop_lookup,
+    site_lookup,
     plan_journey,
+    get_site_departures,
+    _convert_site_id,
     _convert_utc_to_stockholm,
     _get_best_time,
     _simplify_journey_response,
@@ -322,3 +322,166 @@ def test_timezone_conversion_parametrized(time_str, expected):
     """Test timezone conversion with various inputs."""
     result = _convert_utc_to_stockholm(time_str)
     assert result == expected
+
+class TestSiteLookup:
+    """Test site lookup functionality."""
+
+    @responses.activate
+    def test_site_lookup_success(self):
+        """Test successful site lookup."""
+        # Mock stop_lookup to return valid data
+        mock_stop_response = {
+            "locations": [
+                {
+                    "id": "300109001",
+                    "name": "T-Centralen",
+                    "coord": [18.0578, 59.3317],
+                    "matchQuality": 1000,
+                    "isBest": True,
+                }
+            ]
+        }
+
+        responses.add(
+            responses.GET, f"{BASE_URL}/stop-finder", json=mock_stop_response, status=200
+        )
+
+        result = site_lookup("T-Centralen")
+
+        assert len(result) == 1
+        assert result[0]["id"] == 9001
+        assert result[0]["original_id"] == "300109001"
+        assert result[0]["name"] == "T-Centralen"
+
+    @responses.activate
+    def test_site_lookup_error(self):
+        """Test site lookup with API error."""
+        responses.add(responses.GET, f"{BASE_URL}/stop-finder", status=500)
+
+        result = site_lookup("T-Centralen")
+
+        assert len(result) == 1
+        assert "error" in result[0]
+
+    @responses.activate
+    def test_site_lookup_empty_response(self):
+        """Test site lookup with empty response."""
+        responses.add(
+            responses.GET, f"{BASE_URL}/stop-finder", json={"locations": []}, status=200
+        )
+
+        result = site_lookup("NonExistentStop")
+
+        assert result == []
+
+    def test_site_id_conversion(self):
+        """Test site ID conversion logic."""
+        # Test valid case
+        assert _convert_site_id("300109001") == 9001
+
+        # Test invalid cases
+        assert _convert_site_id("invalid") is None
+        assert _convert_site_id("123") is None
+        assert _convert_site_id(12345) is None
+
+class TestGetSiteDepartures:
+    """Test get site departures functionality."""
+
+    @responses.activate
+    def test_get_site_departures_success(self):
+        """Test successful departure retrieval."""
+        mock_response = {
+            "statusCode": 200,
+            "message": "OK",
+            "departures": [
+                {
+                    "transport": "METRO",
+                    "line": "19",
+                    "direction": "Handen",
+                    "timeTabledDateTime": "2025-07-05T13:18:00Z",
+                    "expectedDateTime": "2025-07-05T13:18:00Z",
+                    "displayTime": "13:18"
+                }
+            ],
+            "deviations": []
+        }
+
+        responses.add(
+            responses.GET,
+            f"https://transport.integration.sl.se/v1/sites/9001/departures",
+            json=mock_response,
+            status=200
+        )
+
+        result = get_site_departures(9001)
+
+        assert "departures" in result
+        assert len(result["departures"]) == 1
+        assert result["departures"][0]["transport"] == "METRO"
+        assert result["departures"][0]["line"] == "19"
+
+    @responses.activate
+    def test_get_site_departures_error(self):
+        """Test departure retrieval with API error."""
+        responses.add(
+            responses.GET,
+            f"https://transport.integration.sl.se/v1/sites/9001/departures",
+            status=500
+        )
+
+        result = get_site_departures(9001)
+
+        assert "error" in result
+
+    @responses.activate
+    def test_get_site_departures_empty_response(self):
+        """Test departure retrieval with empty response."""
+        mock_response = {
+            "statusCode": 200,
+            "message": "OK",
+            "departures": [],
+            "deviations": []
+        }
+
+        responses.add(
+            responses.GET,
+            f"https://transport.integration.sl.se/v1/sites/9001/departures",
+            json=mock_response,
+            status=200
+        )
+
+        result = get_site_departures(9001)
+
+        assert "departures" in result
+        assert len(result["departures"]) == 0
+
+    @responses.activate
+    def test_get_site_departures_with_filters(self):
+        """Test departure retrieval with filters."""
+        mock_response = {
+            "statusCode": 200,
+            "message": "OK",
+            "departures": [
+                {
+                    "transport": "METRO",
+                    "line": "19",
+                    "direction": "Handen",
+                    "timeTabledDateTime": "2025-07-05T13:18:00Z",
+                    "expectedDateTime": "2025-07-05T13:18:00Z",
+                    "displayTime": "13:18"
+                }
+            ],
+            "deviations": []
+        }
+
+        responses.add(
+            responses.GET,
+            f"https://transport.integration.sl.se/v1/sites/9001/departures?transport=METRO&direction=1&line=19&forecast=30",
+            json=mock_response,
+            status=200
+        )
+
+        result = get_site_departures(9001, transport="METRO", direction=1, line=19, forecast=30)
+
+        assert "departures" in result
+        assert len(result["departures"]) == 1
